@@ -1,0 +1,57 @@
+name: Alertas Nvidia
+
+on:
+  schedule:
+    # Horario de mercado de EE.UU. (lun-vie, ~10:30-18:00 Argentina): cada 10 minutos.
+    - cron: "*/10 13-20 * * 1-5"
+    # Fuera de horario: una vez por hora, solo para noticias (y resumen del cierre).
+    - cron: "7 0-12,21-23 * * *"
+    - cron: "7 13-20 * * 0,6"
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "run = revisar ahora · test = mandar notificación de prueba"
+        type: choice
+        options: [run, test]
+        default: test
+
+concurrency:
+  group: nvidia-alertas
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  alertas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: nvidia-alertas
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Recuperar estado anterior
+        uses: actions/cache/restore@v4
+        with:
+          path: nvidia-alertas/state.json
+          key: nvidia-state-${{ github.run_id }}
+          restore-keys: nvidia-state-
+
+      - name: Revisar precio y noticias
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          STEP_PCT: ${{ vars.STEP_PCT || '2' }}
+          DAILY_LEVELS: ${{ vars.DAILY_LEVELS || '3,5,7,10' }}
+        run: python nvidia-alertas/alertas.py "${{ inputs.modo || 'run' }}"
+
+      - name: Guardar estado
+        if: always() && hashFiles('nvidia-alertas/state.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: nvidia-alertas/state.json
+          key: nvidia-state-${{ github.run_id }}
